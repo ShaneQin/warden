@@ -5,7 +5,6 @@ const Warden = (options) => {
     ajaxInfo: {},
     fetchNum: 0,
     fetchLength: 0,
-    errorList: []
   }
 
   let startTime = performance.now()
@@ -45,9 +44,16 @@ const Warden = (options) => {
       const info = getRequestInfo(args)
       return _fetch.apply(this, arguments)
         .then(res => {
+          if (info.type === 'report-data') return res
+          try {
+
+          } catch (e) {
+          }
+          getFetchTime()
           return res
         })
         .catch(err => {
+          getFetchTime()
           return err
         })
     }
@@ -114,6 +120,19 @@ const Warden = (options) => {
       bl: (timing.domInteractive || timing.domLoading) - timing.fetchStart || 0,
       // domReadyTime
       dr: timing.domContentLoadedEventEnd - timing.fetchStart || 0
+    }
+  }
+
+  function reportData(type = 1) {
+    const info = {
+      time: new Date().getTime(),
+      url: location.href,
+      type: 1
+    }
+    if (type === 1) {
+
+    } else if (type === 2) {
+      
     }
   }
 }
