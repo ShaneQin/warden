@@ -1,15 +1,89 @@
-const Warden = (options) => {
-  const data = {
+window.WARDEN_EXTRA_DATA = {}
+
+Warden.addData = fn => fn && fn(WARDEN_EXTRA_DATA)
+
+function Warden(opt, cb) {
+  let OPTIONS = {
+    domain: '',
+    delay: 300,
+    extra: {}
+  }
+  OPTIONS = Object.assign(OPTIONS, opt);
+  const DATA = {
     performance: {},
     resourceInfo: [],
-    ajaxInfo: {},
     fetchNum: 0,
     fetchLength: 0,
+    prevUrl: document.referrer && document.referrer !== location.href ? document.referrer : '',
+    pageUrl: '',
+    ajaxNum: 0,
+    ajaxInfo: {},
+    ajaxLength: 0,
+    hasAjax: false
   }
 
   let startTime = performance.now()
   let loadTime = 0
   let fetchTime = 0
+  let ajaxTime = 0
+
+  window.addEventListener('load', () => {
+    loadTime = performance.now() - startTime
+    handleReportType()
+  }, false)
+
+  injectFetch()
+  injectAjax()
+
+  function reportData(type = 1) {
+    setTimeout(() => {
+      getPerformance()
+      getResourceInfo()
+      const screenWidth = document.documentElement.clientWidth || document.body.clientWidth
+      const screenHeight = document.documentElement.clientHeight || document.body.clientHeight
+      let info = {
+        time: new Date().getTime(),
+        extraData: WARDEN_EXTRA_DATA,
+        type,
+        url: location.href
+      }
+      if (type === 1) {
+        info = {
+          ...info,
+          prevUrl: DATA.prevUrl,
+          performance: DATA.performance,
+          resourceInfo: DATA.resourceInfo,
+          screenWidth,
+          screenHeight,
+        }
+      } else if (type === 2) {
+        info = {
+          ...info,
+          resourceInfo: DATA.resourceInfo,
+        }
+      }
+
+      if (!cb && window.fetch) {
+        fetch(OPTIONS.domain, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          type: 'report-data',
+          body: JSON.stringify(info)
+        })
+      }
+      Promise.resolve().then(() => { clear() });
+    }, OPTIONS.delay)
+  }
+
+  function handleReportType() {
+    if (DATA.pageUrl !== location.href) {
+      // 页面性能
+      reportData(1)
+    } else {
+      // ajax
+      reportData(2)
+    }
+  }
 
   const getRequestInfo = (...args) => {
     const info = {
@@ -36,7 +110,7 @@ const Warden = (options) => {
     return info
   }
 
-  const injectFetch = () => {
+  function injectFetch() {
     if (!window.fetch) return;
     const _fetch = fetch
     window.fetch = function () {
@@ -53,21 +127,80 @@ const Warden = (options) => {
           return res
         })
         .catch(err => {
-          getFetchTime()
+          if (info.type === 'report-data') return
           return err
         })
     }
   }
 
-  function getFetchTime() {
-    data.fetchNum++
-    if (data.fetchNum === data.fetchLength) {
-      data.fetchNum = data.fetchLength = 0
-      fetchTime = performance.now() - startTime
-    }
+  function injectAjax(...injectArgs) {
+    const _ajax = window.$.ajax
+    Object.defineProperty(window.$, 'ajax', {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value(...args) {
+        const info = ajaxArgs(args)
+        const url = info.url ? info.url.split('?')[0] : ''
+        DATA.ajaxInfo[url] = info
+        DATA.ajaxLength++
+        DATA.hasAjax = true
+        const _complete = args[0].complete || function (data) {
+        }
+        args[0].complete = function (data) {
+          if (data.status === 200 && data.readyState === 4) {
+            const url = this.url ? this.url.split('?')[0] : '';
+            try {
+              if (DATA.ajaxInfo[url]) {
+                DATA.ajaxInfo[url]['decodedBodySize'] = data.responseText.length
+                getAjaxTime('load');
+              }
+            } catch (err) {
 
+            }
+          }
+          return _complete.apply(this, args)
+        }
+        return _ajax.apply(this, injectArgs)
+      }
+    })
   }
 
+  function ajaxArgs(...args) {
+    const info = {
+      method: 'GET',
+      type: 'xmlhttprequest',
+      report: ''
+    }
+    try {
+      const { url, type, report, data } = args[0]
+      info.url = url
+      info.method = type
+      info.report = report
+      info.options = data
+    } catch (err) {
+
+    }
+    return info
+  }
+
+  function getFetchTime() {
+    DATA.fetchNum++
+    if (DATA.fetchNum === DATA.fetchLength) {
+      DATA.fetchNum = DATA.fetchLength = 0
+      fetchTime = performance.now() - startTime
+      handleReportType()
+    }
+  }
+
+  function getAjaxTime() {
+    DATA.ajaxNum++
+    if (DATA.ajaxNum === DATA.ajaxLength) {
+      DATA.ajaxNum = DATA.ajaxLength = 0
+      ajaxTime = performance.now() - startTime
+      handleReportType()
+    }
+  }
 
   const getResourceInfo = () => {
     if (!window.performance || !window.performance.getEntries) return false
@@ -85,7 +218,7 @@ const Warden = (options) => {
       // todo
       resourceInfo.push(info)
     })
-    data.resourceInfo = resourceInfo
+    DATA.resourceInfo = resourceInfo
   }
 
   const getPerformance = () => {
@@ -99,7 +232,7 @@ const Warden = (options) => {
       } catch (err) {
       }
     }
-    data.performance = {
+    DATA.performance = {
       // 重定向时间
       rd: timing.redirectEnd - timing.redirectStart || 0,
       // dns查询耗时
@@ -123,17 +256,18 @@ const Warden = (options) => {
     }
   }
 
-  function reportData(type = 1) {
-    const info = {
-      time: new Date().getTime(),
-      url: location.href,
-      type: 1
+  function clear() {
+    if (window.performance && window.performance.clearResourceTimings) {
+      performance.clearResourceTimings()
     }
-    if (type === 1) {
-
-    } else if (type === 2) {
-      
-    }
+    DATA.performance = {}
+    DATA.prevUrl = ''
+    DATA.resourceInfo = []
+    DATA.pageUrl = location.href
+    DATA.hasAjax = false
+    DATA.ajaxInfo = {}
+    window.WARDEN_EXTRA_DATA = {}
+    ajaxTime = 0
   }
 }
 
