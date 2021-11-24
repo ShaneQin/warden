@@ -34,6 +34,7 @@ function Warden(opt, cb) {
 
   injectFetch()
   injectAjax()
+  injectAxios()
 
   function reportData(type = 1) {
     setTimeout(() => {
@@ -71,7 +72,9 @@ function Warden(opt, cb) {
           body: JSON.stringify(info)
         })
       }
-      Promise.resolve().then(() => { clear() });
+      Promise.resolve().then(() => {
+        clear()
+      });
     }, OPTIONS.delay)
   }
 
@@ -166,18 +169,67 @@ function Warden(opt, cb) {
     })
   }
 
-  function ajaxArgs(...args) {
+  function injectAxios() {
+    if (!window.axios) return
+    const _axios = window.axios
+    const list = ['axios', 'request', 'get', 'delete', 'head', 'options', 'put', 'post', 'patch']
+    list.forEach(item => {
+      let key = null
+      if (item === 'axios') {
+        window['axios'] = inject;
+        key = _axios
+      } else if (item === 'request') {
+        window['axios']['request'] = inject
+        key = _axios['request']
+      } else {
+        window['axios'][item] = inject
+        key = _axios['request']
+      }
+
+      function inject(...args) {
+        const info = ajaxArgs(args, item)
+        if (info.report !== 'report-data') {
+          
+        }
+      }
+    })
+  }
+
+  function ajaxArgs(args, item) {
     const info = {
       method: 'GET',
       type: 'xmlhttprequest',
       report: ''
     }
     try {
-      const { url, type, report, data } = args[0]
-      info.url = url
-      info.method = type
-      info.report = report
-      info.options = data
+
+      if (item) {
+        if (item === 'axios' || item === 'request') {
+          const { url, data, method, params } = args[0]
+          info.url = url
+          info.method = method
+          info.options = method.toLowerCase() === 'get' ? params : data
+        } else {
+          info.url = args[0]
+          info.method = ''
+          if (args[1]) {
+            if (args[1].params) {
+              info.method = 'GET'
+              info.options = args[1].params;
+            } else {
+              info.method = 'POST'
+              info.options = args[1];
+            }
+          }
+        }
+        info.report = args[0].report
+      } else {
+        const { url, type, report, data } = args[0]
+        info.url = url
+        info.method = type
+        info.report = report
+        info.options = data
+      }
     } catch (err) {
 
     }
