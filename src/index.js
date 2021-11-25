@@ -1,6 +1,16 @@
+import { getLCP, getFID, getCLS } from 'web-vitals'
+
 window.WARDEN_EXTRA_DATA = {}
 
-Warden.addData = fn => fn && fn(WARDEN_EXTRA_DATA)
+Warden.addData = function (fn) {
+  fn && fn(WARDEN_EXTRA_DATA)
+};
+
+if (typeof require === 'function' && typeof exports === 'object' && typeof module === 'object') {
+  module.exports = Warden
+} else {
+  window.Warden = Warden
+}
 
 function Warden(opt, CB) {
   try {
@@ -18,7 +28,10 @@ function Warden(opt, CB) {
       requestNum: 0,
       requestInfo: {},
       requestLength: 0,
-      hasRequest: false
+      hasRequest: false,
+      LCP: '',
+      FID: '',
+      CLS: ''
     }
 
     let startTime = getCurrentTime()
@@ -30,6 +43,22 @@ function Warden(opt, CB) {
       handleReportType()
     }, false)
 
+    getLCP(data => {
+      console.log(data)
+      DATA.LCP = data
+      reportData(3)
+    })
+
+    getFID(data => {
+      DATA.FID = data
+      reportData(3)
+    })
+
+    getCLS(data => {
+      DATA.CLS = data
+      reportData(3)
+    })
+
     injectFetch()
     injectAjax()
     injectAxios()
@@ -40,7 +69,7 @@ function Warden(opt, CB) {
       window.fetch = function (...args) {
         const info = getRequestInfo('fetch', args)
         if (info.type !== 'report-data') {
-          clear(1)
+          clearPerformance()
           const url = getUrl(info)
           DATA.requestInfo[url] = info
           DATA.requestLength++
@@ -75,24 +104,25 @@ function Warden(opt, CB) {
         enumerable: true,
         writable: true,
         value(...args) {
-          const info = ajaxArgs(args)
-          const url = info.url ? info.url.split('?')[0] : ''
-          DATA.ajaxInfo[url] = info
-          DATA.ajaxLength++
-          DATA.hasAjax = true
+          const info = getRequestInfo('jquery', args)
+          const url = getUrl(info)
+          DATA.requestInfo[url] = info
+          DATA.requestLength++
+          DATA.hasRequest = true
           const _complete = args[0].complete || function (data) {
           }
           args[0].complete = function (data) {
+            if (this.report === 'report-data') return data
             if (data.status === 200 && data.readyState === 4) {
-              const url = this.url ? this.url.split('?')[0] : '';
+              const url = getUrl(this)
               try {
-                if (DATA.ajaxInfo[url]) {
-                  DATA.ajaxInfo[url]['decodedBodySize'] = data.responseText.length
-                  getAjaxTime('load');
+                if (DATA.requestInfo[url]) {
+                  DATA.requestInfo[url]['decodedBodySize'] = data.responseText.length
+
                 }
               } catch (err) {
-
               }
+              getRequestTime();
             }
             return _complete.apply(this, args)
           }
@@ -104,8 +134,8 @@ function Warden(opt, CB) {
     function injectAxios() {
       if (!window.axios) return
       const _axios = window.axios
-      const list = ['axios', 'request', 'get', 'delete', 'head', 'options', 'put', 'post', 'patch']
-      list.forEach(item => {
+      const methodList = ['axios', 'request', 'get', 'delete', 'head', 'options', 'put', 'post', 'patch']
+      methodList.forEach(item => {
         let key = null
         if (item === 'axios') {
           window['axios'] = inject;
@@ -115,33 +145,30 @@ function Warden(opt, CB) {
           key = _axios['request']
         } else {
           window['axios'][item] = inject
-          key = _axios['request']
+          key = _axios[item]
         }
 
         function inject(...args) {
-          const info = ajaxArgs(args, item)
+          const info = getRequestInfo(args, item, 'axios')
           if (info.report !== 'report-data') {
-            const url = info.url ? info.url.split('?')[0] : ''
-            DATA.ajaxInfo[url] = info
-            DATA.ajaxLength++
-            DATA.hasAjax = true
+            const url = getUrl(info)
+            DATA.requestInfo[url] = info
+            DATA.requestLength++
+            DATA.hasRequest = true
           }
           return key.apply(this, args)
             .then(res => {
               if (info.report === 'report-data') return res
-              getAjaxTime('load')
+              getRequestTime()
               try {
-                const responseURL = res.request.responseURL ? res.request.responseURL.split('?')[0] : ''
+                const responseURL = getUrl(res.request, 'responseURL')
                 const responseText = res.request.responseText
-                if (DATA.ajaxInfo[responseURL]) {
-                  DATA.ajaxInfo[responseURL]['decodedBodySize'] = responseText.length
+                if (DATA.resourceInfo[responseURL]) {
+                  DATA.resourceInfo[responseURL]['decodedBodySize'] = responseText.length
                 }
               } catch (err) {
               }
               return res
-            })
-            .catch(err => {
-              return err
             })
         }
       })
@@ -166,6 +193,7 @@ function Warden(opt, CB) {
             info.url = args[0]
             info.method = args[1].method || 'GET'
             info.type = args[1].type || 'fetchrequest'
+            console.log(info)
           }
         } else if (type === 'jquery') {
           const { url, type, report, data } = args[0]
@@ -208,7 +236,7 @@ function Warden(opt, CB) {
       }
     }
 
-    const getResourceInfo = () => {
+    function getResourceInfo() {
       if (!window.performance || !window.performance.getEntries) return false
       const resourceList = performance.getEntriesByType('resource')
       let resourceInfo = []
@@ -234,7 +262,7 @@ function Warden(opt, CB) {
       DATA.resourceInfo = resourceInfo
     }
 
-    const getPerformance = () => {
+    function getPerformance() {
       let timing = window.performance.timing;
       if (typeof window.PerformanceNavigationTiming === 'function') {
         try {
@@ -247,26 +275,30 @@ function Warden(opt, CB) {
       }
       DATA.performance = {
         // 重定向时间
-        rd: timing.redirectEnd - timing.redirectStart || 0,
+        redirect: timing.redirectEnd - timing.redirectStart || 0,
         // dns查询耗时
-        dn: timing.domainLookupEnd - timing.domainLookupStart || 0,
+        dnsLoopUp: timing.domainLookupEnd - timing.domainLookupStart || 0,
         // TTFB 读取页面第一个字节的时间
-        tt: timing.responseStart - timing.navigationStart || 0,
+        ttfb: timing.responseStart - timing.navigationStart || 0,
         // DNS 缓存时间
-        ap: timing.domainLookupStart - timing.fetchStart || 0,
+        dnsCache: timing.domainLookupStart - timing.fetchStart || 0,
         // 卸载页面的时间
-        ul: timing.unloadEventEnd - timing.unloadEventStart || 0,
+        unload: timing.unloadEventEnd - timing.unloadEventStart || 0,
         // tcp连接耗时
-        tp: timing.connectEnd - timing.connectStart || 0,
+        connect: timing.connectEnd - timing.connectStart || 0,
         // request请求耗时
-        rq: timing.responseEnd - timing.requestStart || 0,
+        request: timing.responseEnd - timing.requestStart || 0,
         // 解析dom树耗时
-        tr: timing.domComplete - timing.domInteractive || 0,
+        domTree: timing.domComplete - timing.domInteractive || 0,
         // 白屏时间
-        bl: (timing.domInteractive || timing.domLoading) - timing.fetchStart || 0,
+        blank: (timing.domInteractive || timing.domLoading) - timing.fetchStart || 0,
         // domReadyTime
-        dr: timing.domContentLoadedEventEnd - timing.fetchStart || 0
+        domReady: timing.domContentLoadedEventEnd - timing.fetchStart || 0
       }
+    }
+
+    function getDeviceInfo() {
+
     }
 
 
@@ -304,6 +336,13 @@ function Warden(opt, CB) {
             ...info,
             resourceInfo: DATA.resourceInfo,
           }
+        } else if (type === 3) {
+          info = {
+            ...info,
+            LCP: DATA.LCP,
+            FID: DATA.FID,
+            CLS: DATA.CLS
+          }
         }
 
         info = Object.assign(info, OPTIONS.add)
@@ -318,6 +357,12 @@ function Warden(opt, CB) {
         }
         Promise.resolve().then(() => clear());
       }, OPTIONS.delay)
+    }
+
+    function clearPerformance() {
+      if (DATA.hasRequest && DATA.requestLength === 0) {
+        clear(1)
+      }
     }
 
     function clear(type = 0) {
@@ -343,11 +388,4 @@ function Warden(opt, CB) {
     }
   } catch (err) {
   }
-}
-
-
-if (typeof require === 'function' && typeof exports === 'object' && typeof module === 'object') {
-  module.exports = Warden
-} else {
-  window.Warden = Warden
 }
