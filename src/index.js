@@ -29,6 +29,7 @@ function Warden(opt, CB) {
       requestInfo: {},
       requestLength: 0,
       hasRequest: false,
+      system: '',
       LCP: '',
       FID: '',
       CLS: ''
@@ -297,10 +298,16 @@ function Warden(opt, CB) {
       }
     }
 
-    function getDeviceInfo() {
-
+    function getSystem() {
+      const ua = navigator.userAgent
+      if (ua.indexOf('Android') > -1 || ua.indexOf('Adr') > -1) {
+        DATA.system = 'Android'
+      } else if (ua.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/)) {
+        DATA.system = 'IOS'
+      } else {
+        DATA.system = 'PC'
+      }
     }
-
 
     function handleReportType() {
       if (DATA.pageUrl !== location.href) {
@@ -314,6 +321,7 @@ function Warden(opt, CB) {
       setTimeout(() => {
         getPerformance()
         getResourceInfo()
+        getSystem()
         const screenWidth = document.documentElement.clientWidth || document.body.clientWidth
         const screenHeight = document.documentElement.clientHeight || document.body.clientHeight
         let info = {
@@ -328,6 +336,7 @@ function Warden(opt, CB) {
             prevUrl: DATA.prevUrl,
             performance: DATA.performance,
             resourceInfo: DATA.resourceInfo,
+            system: DATA.system,
             screenWidth,
             screenHeight,
           }
