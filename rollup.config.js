@@ -1,21 +1,18 @@
 import babel from '@rollup/plugin-babel'
 import resolve from '@rollup/plugin-node-resolve'
 import commonjs from '@rollup/plugin-commonjs'
-import html from '@rollup/plugin-html'
-import { terser } from "rollup-plugin-terser";
-import { liveServer } from 'rollup-plugin-live-server'
+import server from 'rollup-plugin-serve'
+import livereload from 'rollup-plugin-livereload'
+import { terser } from 'rollup-plugin-terser'
 
 const isDevelopment = process.env.NODE_ENV === 'development'
 const isProduction = process.env.NODE_ENV === 'production'
 
-let outputFile = './dist/warden.js'
-isDevelopment && (outputFile = './server/warden.js')
-
 export default {
   input: './src/index.js',
   output: {
-    file: outputFile,
-    format: 'es'
+    file: './dist/warden.js',
+    format: 'iife'
   },
   plugins: [
     resolve(),
@@ -26,16 +23,15 @@ export default {
         ['@babel/preset-env']
       ],
       plugins: [
-        ["@babel/plugin-transform-runtime" ]
+        ['@babel/plugin-transform-runtime']
       ],
       exclude: 'node_modules/**'
     }),
-    isDevelopment && html(),
-    isDevelopment && liveServer({
-      file: "index.html",
-      mount: [['/server', './server'], ['/src', './src'], ['/node_modules', './node_modules']],
-      open: true
+    isDevelopment && server({
+      open: true,
+      contentBase: ['public', 'dist'],
     }),
-    false && terser()
+    isDevelopment && livereload(),
+    isProduction && terser()
   ]
 }

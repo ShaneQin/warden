@@ -18,7 +18,7 @@ function Warden(opt, CB) {
       performance: {},
       resourceInfo: [],
       pageUrl: '',
-      system: '',
+      systemInfo: '',
       LCP: '',
       FID: '',
       CLS: ''
@@ -101,7 +101,7 @@ function Warden(opt, CB) {
       }
     }
 
-    function getSystem() {
+    function getSystemInfo() {
       // 权重：系统 + 系统版本 > 平台 > 内核 + 载体 + 内核版本 + 载体版本 > 外壳 + 外壳版本
       const ua = navigator.userAgent.toLowerCase()
       const testUa = regexp => regexp.test(ua)
@@ -231,7 +231,7 @@ function Warden(opt, CB) {
         shell = 'maxthon' // 遨游浏览器
         shellVs = testVs(/maxthon\/[\d._]+/g)
       }
-      return Object.assign({
+      const systemInfo = Object.assign({
         engine, // webkit gecko presto trident
         engineVs,
         platform, // desktop mobile
@@ -243,13 +243,14 @@ function Warden(opt, CB) {
         shell, // wechat qq uc 360 2345 sougou liebao maxthon
         shellVs
       })
+      DATA.systemInfo = systemInfo
     }
 
     function reportData(type = 1, name) {
       setTimeout(() => {
         getPerformance()
         getResourceInfo()
-        getSystem()
+        getSystemInfo()
         let info = {
           type,
           time: new Date().getTime(),
@@ -260,7 +261,7 @@ function Warden(opt, CB) {
             ...info,
             performance: DATA.performance,
             resourceInfo: DATA.resourceInfo,
-            system: DATA.system,
+            systemInfo: DATA.systemInfo,
             extra: OPTIONS.extra,
           }
         } else if (type === 2) {
